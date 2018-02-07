@@ -437,7 +437,7 @@ public:
 
 					for (auto funcname : exports)
 					{
-						if (funcname.isData_)
+						if (funcname.isData_ || funcname.isJumpFunc_)
 						{
 							continue;
 						}
@@ -468,7 +468,7 @@ public:
 						uint16_t	ordit = funcname.get_ordinal();
 						if (funcname.has_name())
 						{
-							if (funcname.isData_)
+							if (funcname.isData_ || funcname.isJumpFunc_)
 							{
 								continue;
 							}
@@ -518,7 +518,16 @@ public:
 					//
 					for (auto funcname : exports)
 					{
-						if (funcname.has_name())
+						if (funcname.isJumpFunc_)
+						{
+							wsprintf(tipsMessage,
+								L"#pragma comment(linker, \"/EXPORT:%S=%S,@%d\")\r\n",
+								funcname.get_name().c_str(),
+								funcname.isjumpFuncName_,
+								funcname.get_ordinal());
+
+						}
+						else if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
 								L"#pragma comment(linker, \"/EXPORT:%S=AheadLib_%S,@%d\")\r\n",
@@ -544,7 +553,11 @@ public:
 
 					for (auto funcname : exports)
 					{
-						if (funcname.isData_)
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.isData_)
 						{
 							if (funcname.has_name())
 							{
@@ -575,7 +588,11 @@ public:
 					//函数指针定义
 					for (auto funcname : exports)
 					{
-						if (funcname.has_name())
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
 								L" PVOID pfnAheadLib_%S;\r\n",
@@ -593,7 +610,11 @@ public:
 					//函数定义
 					for (auto funcname : exports)
 					{
-						if (funcname.isData_)
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.isData_)
 						{
 							continue;
 						}
@@ -636,7 +657,7 @@ public:
 					g_sourceFile += L"	g_OldModule = LoadLibrary(tzPath);\r\n";
 					g_sourceFile += L"	if (g_OldModule == NULL)\r\n";
 					g_sourceFile += L"	{\r\n";
-					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %s,程序无法正常运行\"), tzPath);\r\n";
+					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到模块 %s,程序无法正常运行\"), tzPath);\r\n";
 					g_sourceFile += L"		MessageBox(NULL, tzTemp, TEXT(\"AheadLib\"), MB_ICONSTOP);\r\n";
 					g_sourceFile += L"	}\r\n";
 					g_sourceFile += L"\r\n";
@@ -674,7 +695,7 @@ public:
 					g_sourceFile += L"			pszProcName = szProcName;\r\n";
 					g_sourceFile += L"		}\r\n";
 					g_sourceFile += L"\r\n";
-					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %s,程序无法正常运行\"), pszProcName);\r\n";
+					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %S,程序无法正常运行\"), pszProcName);\r\n";
 					g_sourceFile += L"		MessageBox(NULL, tzTemp, TEXT(\"AheadLib\"), MB_ICONSTOP);\r\n";
 					g_sourceFile += L"		ExitProcess(-2);\r\n";
 					g_sourceFile += L"	}\r\n";
@@ -694,7 +715,11 @@ public:
 					//
 					for (auto funcname : exports)
 					{
-						if (funcname.has_name())
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.has_name())
 						{
 							if (funcname.isData_)
 							{
@@ -827,8 +852,16 @@ public:
 					//
 					for (auto funcname : exports)
 					{
-					
-						if (funcname.has_name())
+						if (funcname.isJumpFunc_)
+						{
+							wsprintf(tipsMessage,
+								L"#pragma comment(linker, \"/EXPORT:%S=%S,@%d\")\r\n",
+								funcname.get_name().c_str(),
+								funcname.isjumpFuncName_,
+								funcname.get_ordinal());
+
+						}
+						else if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
 								L"#pragma comment(linker, \"/EXPORT:%S=_AheadLib_%S,@%d\")\r\n",
@@ -851,10 +884,16 @@ public:
 					//生成全局变量
 					//
 
-
 					for (auto funcname : exports)
 					{
-						if (funcname.has_name())
+						//
+						//不用生成中转输出表函数
+						//
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
 								L"PVOID pfnAheadLib_%S;\r\n",
@@ -877,7 +916,14 @@ public:
 
 					for (auto funcname : exports)
 					{
-						if (funcname.isData_)
+						//
+						//不用生成中转输出表函数
+						//
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if(funcname.isData_)
 						{
 							if (funcname.has_name())
 							{
@@ -923,7 +969,7 @@ public:
 					g_sourceFile += L"	g_OldModule = LoadLibrary(tzPath);\r\n";
 					g_sourceFile += L"	if (g_OldModule == NULL)\r\n";
 					g_sourceFile += L"	{\r\n";
-					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %s,程序无法正常运行\"), tzPath);\r\n";
+					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到模块 %s,程序无法正常运行\"), tzPath);\r\n";
 					g_sourceFile += L"		MessageBox(NULL, tzTemp, TEXT(\"AheadLib\"), MB_ICONSTOP);\r\n";
 					g_sourceFile += L"	}\r\n";
 					g_sourceFile += L"\r\n";
@@ -980,7 +1026,14 @@ public:
 					//
 					for (auto funcname : exports)
 					{
-						if (funcname.has_name())
+						//
+						//如果是中转输出表，则不用生成
+						//
+						if (funcname.isJumpFunc_)
+						{
+							continue;
+						}
+						else if (funcname.has_name())
 						{
 							if (funcname.isData_)
 							{
@@ -1090,13 +1143,16 @@ public:
 					g_sourceFile += L"}\r\n\r\n";
 
 					//
-					//生成中转函数
+					//生成中转函数 
 					//
 
 					g_sourceFile += L" // 导出函数\r\n";
 					for (auto funcname : exports)
 					{
-						if (funcname.isData_)
+						//
+						//如果是 导出数据 或者 中转输出表函数则不生成
+						//
+						if (funcname.isData_ || funcname.isJumpFunc_)
 						{
 							continue;
 						}
