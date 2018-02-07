@@ -49,6 +49,12 @@ public: //Setters do not change everything inside image, they are used by PE cla
 	//Sets forwarded function name (or clears it, if empty name is passed)
 	void set_forwarded_name(const std::string& name);
 
+	//is export data?
+	bool isData_ = false;
+	int	isDataCount_ = 0;
+
+	bool isJumpFunc_ = false;
+	char *isjumpFuncName_ = NULL;
 private:
 	uint16_t ordinal_; //Function ordinal
 	uint32_t rva_; //Function RVA

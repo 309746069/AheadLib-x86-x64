@@ -59,6 +59,7 @@ public:
 	std::wstring		g_sourceFile;
 	std::wstring		g_masmFile;
 	BOOL				isx64 = FALSE;
+	BOOL				g_MakeStatus = FALSE;
 
 	LRESULT DebugMessage(char *format, ...)
 	{
@@ -103,19 +104,34 @@ public:
 		return ret_str;
 	}
 
+	BOOL IsJumpFunction(char *pRawAddr) //判断是否是中转函数  如:KERNEL32.VerLanguageNameA
+	{
+		int nCount = 0;
+		while (*pRawAddr++ != '\0')
+		{
+			if (*pRawAddr == '.')
+			{
+				nCount++;
+			}
+		}
+		return nCount == 1 ? TRUE : FALSE;
+	}
+
 	BOOL DoWriteFile(WCHAR *path, std::wstring &data)
 	{
+		
+
 		BOOL		result = FALSE;
 		HANDLE		hFile;
 		DWORD		written = 0;
 		std::string	wdata;
 
 		hFile = CreateFile(path,
-							GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 
-							NULL,
-							CREATE_ALWAYS, 
-							FILE_ATTRIBUTE_NORMAL, 
-							NULL);
+			GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL,
+			NULL);
 		if (hFile == INVALID_HANDLE_VALUE)
 		{
 			return FALSE;
@@ -158,6 +174,11 @@ public:
 		WCHAR		fileAsmPath[MAX_PATH];
 		WCHAR		fileCppPath[MAX_PATH];
 
+		if (!g_MakeStatus)
+		{
+			return FALSE;
+		}
+
 		GetDlgItemText(IDC_EDIT2, fileCppPath, MAX_PATH);
 
 		if (DoWriteFile(fileCppPath, g_sourceFile) == FALSE)
@@ -172,15 +193,15 @@ public:
 			PathRemoveExtension(fileAsmPath);
 			wcscat(fileAsmPath, L"_jump.asm");
 
-			if (DoWriteFile(fileAsmPath, g_masmFile) ==FALSE)
+			if (DoWriteFile(fileAsmPath, g_masmFile) == FALSE)
 			{
-				MessageBox( fileAsmPath, L"Fail!", MB_ICONERROR);
+				MessageBox(fileAsmPath, L"Fail!", MB_ICONERROR);
 				return 0;
 			}
-			
+
 		}
 
-		MessageBox(L"ok", L"info", MB_ICONINFORMATION);
+		MessageBox(L"Generate code success!", L"info", MB_ICONINFORMATION);
 		return 0;
 	}
 
@@ -189,6 +210,8 @@ public:
 		CHAR		filePath[MAX_PATH];
 		WCHAR		fileShortName[MAX_PATH];
 
+		g_MakeStatus = FALSE;
+
 		//
 		//清理数据
 		//
@@ -196,7 +219,7 @@ public:
 		g_masmFile.clear();
 		g_targetFile.clear();
 		isx64 = FALSE;
- 
+
 		//
 		//得到文件名
 		//
@@ -214,8 +237,10 @@ public:
 			pe_base						image(pe_factory::create_pe(pe_file));
 			std::wstring				showExports;
 
-			export_info					info;
+			export_info					exps;
 			exported_functions_list		exports;
+
+			section_list				secs;
 
 			uint64_t					timestamp;
 			struct tm					*tblock;
@@ -231,12 +256,13 @@ public:
 			//
 			//获取导出表函数
 			//
-			exports = get_exported_functions(image, info);
+			exports = get_exported_functions(image, exps);
 
+			secs = image.get_image_sections();
 			//
 			//显示名称字符串
 			//
-			SetDlgItemTextA(m_hWnd, IDC_NAMESTRING, info.get_name().c_str());
+			SetDlgItemTextA(m_hWnd, IDC_NAMESTRING, exps.get_name().c_str());
 
 			//
 			//显示运行平台
@@ -272,12 +298,117 @@ public:
 			//
 			//打印输出导出表函数
 			//
-			SetDlgItemTextA(m_hWnd, IDC_EDIT3, "");
-			for (auto funcname : exports)
+			SetDlgItemTextA(m_hWnd, IDC_EDIT3, NULL);
+			int				nDataCount = 0;
+			std::string		RawDta;
+			uint64_t		imagebase;
+			for (auto &funcname : exports)
 			{
-				wsprintf(tipsMessage,L"%-4d %S\r\n",
-							 funcname.get_ordinal(),
-							 funcname.has_name() ? funcname.get_name().c_str() : "N/A");
+				for (auto sec_ptr : secs)
+				{
+					//
+					//如果这个导出表的RVA地址 不存在可执行属性的区段，那肯定是导出的是数据。
+					//
+					if (sec_ptr.get_virtual_address() <= funcname.get_rva() &&
+						(sec_ptr.get_virtual_address() + sec_ptr.get_virtual_size() >= funcname.get_rva()))
+					{
+						if (!(sec_ptr.get_characteristics() & IMAGE_SCN_MEM_EXECUTE))
+						{
+							RawDta = sec_ptr.get_raw_data();
+							image.get_image_base(imagebase);
+							if (isx64)
+							{
+								uint64_t	*pRawData;;
+
+								pRawData = (uint64_t*)((uint64_t)RawDta.data() + (funcname.get_rva() - sec_ptr.get_virtual_address()));
+
+								if (IsJumpFunction((char*)pRawData))
+								{
+									funcname.isJumpFunc_ = true;
+									funcname.isjumpFuncName_ = (char*)pRawData;
+								}
+								else
+								{
+									funcname.isData_ = true;
+									while (*pRawData >= imagebase &&
+										*pRawData <= (imagebase + image.get_size_of_image()))
+									{
+										nDataCount++;
+										pRawData++;
+									}
+								}
+
+								
+							}
+							else
+							{
+								uint32_t	*pRawData;;
+
+								pRawData = (uint32_t*)((uint32_t)RawDta.data() + (funcname.get_rva() - sec_ptr.get_virtual_address()));
+
+								if (IsJumpFunction((char*)pRawData))
+								{
+									funcname.isJumpFunc_ = true;
+									funcname.isjumpFuncName_ = (char*)pRawData;
+								}
+								else
+								{
+									funcname.isData_ = true;
+									while (*pRawData >= imagebase &&
+										*pRawData <= (imagebase + image.get_size_of_image()))
+									{
+										nDataCount++;
+										pRawData++;
+									}
+								}
+
+
+								
+							}
+
+							//
+							//记录下来，以便生成导出函数
+							//
+							funcname.isDataCount_ = nDataCount;
+
+						}
+						break;
+					}
+				}
+
+				//
+				//生成编辑框信息
+				//
+				if (funcname.isData_ || funcname.isJumpFunc_)
+				{
+					if (funcname.isJumpFunc_)
+					{
+						wsprintf(tipsMessage,
+							L"%-4d %S  < %S > \r\n",
+							funcname.get_ordinal(),
+							funcname.has_name() ? funcname.get_name().c_str() : "N/A",
+							funcname.isjumpFuncName_);
+					}
+					else
+					{
+						wsprintf(tipsMessage,
+							L"%-4d %S  < DATA[%d] > \r\n",
+							funcname.get_ordinal(),
+							funcname.has_name() ? funcname.get_name().c_str() : "N/A",
+							funcname.isDataCount_);
+					}
+
+				}
+				else
+				{
+					wsprintf(tipsMessage,
+						L"%-4d %S\r\n",
+						funcname.get_ordinal(),
+						funcname.has_name() ? funcname.get_name().c_str() : "N/A");
+				}
+	
+
+
 				showExports += tipsMessage;
 			}
 			SetDlgItemText(IDC_EDIT3, showExports.c_str());
@@ -306,17 +437,22 @@ public:
 
 					for (auto funcname : exports)
 					{
+						if (funcname.isData_)
+						{
+							continue;
+						}
+
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									  L"EXTERN pfnAheadLib_%S:dq;\r\n",
-									  funcname.get_name().c_str());
+								L"EXTERN pfnAheadLib_%S:dq;\r\n",
+								funcname.get_name().c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									  L"EXTERN pfnAheadLib_Unnamed%d:dq;\r\n",
-									  funcname.get_ordinal());
+								L"EXTERN pfnAheadLib_Unnamed%d:dq;\r\n",
+								funcname.get_ordinal());
 						}
 						g_masmFile += tipsMessage;
 					}
@@ -332,23 +468,28 @@ public:
 						uint16_t	ordit = funcname.get_ordinal();
 						if (funcname.has_name())
 						{
+							if (funcname.isData_)
+							{
+								continue;
+							}
+
 							wsprintf(tipsMessage,
-									  L"AheadLib_%S PROC\r\n"
-									  L" jmp pfnAheadLib_%S\r\n"
-									  L"AheadLib_%S ENDP\r\n\r\n",
-									  it.c_str(),
-									  it.c_str(),
-									  it.c_str());
+								L"AheadLib_%S PROC\r\n"
+								L" jmp pfnAheadLib_%S\r\n"
+								L"AheadLib_%S ENDP\r\n\r\n",
+								it.c_str(),
+								it.c_str(),
+								it.c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									  L"AheadLib_Unnamed%d PROC\r\n"
-									  L" jmp pfnAheadLib_Unnamed%d\r\n"
-									  L"AheadLib_Unnamed%d ENDP\r\n\r\n",
-									  ordit,
-									  ordit,
-									  ordit);
+								L"AheadLib_Unnamed%d PROC\r\n"
+								L" jmp pfnAheadLib_Unnamed%d\r\n"
+								L"AheadLib_Unnamed%d ENDP\r\n\r\n",
+								ordit,
+								ordit,
+								ordit);
 						}
 						g_masmFile += tipsMessage;
 					}
@@ -367,7 +508,7 @@ public:
 					//
 					//生成头文件依赖
 					//
-					g_sourceFile += L"//Created by AheadLib x86/x64 v1.0\r\n";
+					g_sourceFile += L"//Created by AheadLib x86/x64 v1.1\r\n";
 					g_sourceFile += L"#include <windows.h>\r\n";
 					g_sourceFile += L"#include <Shlwapi.h>\r\n";
 					g_sourceFile += L"#pragma comment( lib, \"Shlwapi.lib\")\r\n\r\n";
@@ -380,57 +521,93 @@ public:
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									  L"#pragma comment(linker, \"/EXPORT:%S=AheadLib_%S,@%d\")\r\n",
-									  funcname.get_name().c_str(),
-									  funcname.get_name().c_str(),
-									  funcname.get_ordinal());
+								L"#pragma comment(linker, \"/EXPORT:%S=AheadLib_%S,@%d\")\r\n",
+								funcname.get_name().c_str(),
+								funcname.get_name().c_str(),
+								funcname.get_ordinal());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									 L"#pragma comment(linker, \"/EXPORT:Noname%d=AheadLib_Unnamed%d,@%d,NONAME\")\r\n",
-									  funcname.get_ordinal(),
-									  funcname.get_ordinal(),
-									  funcname.get_ordinal());
+								L"#pragma comment(linker, \"/EXPORT:Noname%d=AheadLib_Unnamed%d,@%d,NONAME\")\r\n",
+								funcname.get_ordinal(),
+								funcname.get_ordinal(),
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
+
+
+					//
+					//生成导出数据变量
+					//
+
+					for (auto funcname : exports)
+					{
+						if (funcname.isData_)
+						{
+							if (funcname.has_name())
+							{
+								wsprintf(tipsMessage,
+									L"EXTERN_C PVOID AheadLib_%S[%d] = { 0 };\r\n",
+									funcname.get_name().c_str(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"EXTERN_C PVOID AheadLib_Unnamed%d[%d] = { 0 };\r\n",
+									funcname.get_ordinal(),
+									funcname.isDataCount_);
+							}
+							g_sourceFile += tipsMessage;
+						}
+
+					}
+
+					g_sourceFile += L"\r\n\r\n";
 
 					//
 					//生成全局变量
 					//
 					g_sourceFile += L"extern \"C\" {\r\n";
 
+					//函数指针定义
 					for (auto funcname : exports)
 					{
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									  L" PVOID pfnAheadLib_%S;\r\n",
-									  funcname.get_name().c_str());
+								L" PVOID pfnAheadLib_%S;\r\n",
+								funcname.get_name().c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									  L" PVOID pfnAheadLib_Unnamed%d;\r\n",
-									  funcname.get_ordinal());
+								L" PVOID pfnAheadLib_Unnamed%d;\r\n",
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
 
+					//函数定义
 					for (auto funcname : exports)
 					{
+						if (funcname.isData_)
+						{
+							continue;
+						}
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									 L" void AheadLib_%S(void);\r\n",
-									  funcname.get_name().c_str());
+								L" void AheadLib_%S(void);\r\n",
+								funcname.get_name().c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									 L" void AheadLib_Unnamed%d(void);\r\n",
-									  funcname.get_ordinal());
+								L" void AheadLib_Unnamed%d(void);\r\n",
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
@@ -439,7 +616,7 @@ public:
 					g_sourceFile += L"};\r\n\r\n";
 
 					//
-					//生成全局变量
+					//生成全局变量 模块句柄
 					//
 					g_sourceFile += L"static HMODULE	g_OldModule = NULL;\r\n\r\n";
 
@@ -451,7 +628,7 @@ public:
 					g_sourceFile += L"{\r\n";
 					g_sourceFile += L"	TCHAR tzPath[MAX_PATH];\r\n";
 					g_sourceFile += L"	TCHAR tzTemp[MAX_PATH * 2];\r\n";
-					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH);\r\n";
+					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH);  // 这里是否从系统目录加载或者当前目录，自行修改\r\n";
 					g_sourceFile += L"\r\n";
 					g_sourceFile += L"	lstrcat(tzPath, TEXT(\"\\\\";
 					g_sourceFile += g_targetFile.c_str();
@@ -504,6 +681,7 @@ public:
 					g_sourceFile += L"	return fpAddress;\r\n";
 					g_sourceFile += L"}\r\n\r\n";
 
+
 					//
 					//Init()
 					//
@@ -511,21 +689,54 @@ public:
 					g_sourceFile += L"BOOL WINAPI Init()\r\n";
 					g_sourceFile += L"{\r\n";
 
+					//
+					//生成 初始化获取原函数地址
+					//
 					for (auto funcname : exports)
 					{
 						if (funcname.has_name())
 						{
-							wsprintf(tipsMessage,
-									  L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n",
-									  funcname.get_name().c_str(),
-									  funcname.get_name().c_str());
+							if (funcname.isData_)
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n"
+									L"	memcpy(AheadLib_%S,pfnAheadLib_%S,sizeof(PVOID) * %d);\r\n",
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n",
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str());
+							}
+
 						}
 						else
 						{
-							wsprintf(tipsMessage,
-									  L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n",
-									  funcname.get_ordinal(),
-									  funcname.get_ordinal());
+							if (funcname.isData_)
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n"
+									L"	memcpy(AheadLib_%d,pfnAheadLib_Unnamed%d,sizeof(PVOID) * %d);\r\n",
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n",
+									funcname.get_ordinal(),
+									funcname.get_ordinal());
+							}
+
 						}
 						g_sourceFile += tipsMessage;
 					}
@@ -558,7 +769,7 @@ public:
 
 
 
-					//
+					//0
 					//生成DllMain
 					//
 					g_sourceFile += L"BOOL WINAPI DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)\r\n";
@@ -574,9 +785,9 @@ public:
 					g_sourceFile += L"			int nLength = 0;\r\n";
 					g_sourceFile += L"			nLength = GetModuleFileName(NULL, szFullPath, MAX_PATH);\r\n";
 					g_sourceFile += L"			PathStripPath(szFullPath);\r\n";
-					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE)//这里是否判断宿主进程名?\r\n";
+					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE) //这里是否判断宿主进程名?\r\n";
 					g_sourceFile += L"			{\r\n";
-					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL);//打补丁线程\r\n";
+					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL); //打补丁线程\r\n";
 					g_sourceFile += L"			}\r\n";
 					g_sourceFile += L"		}\r\n";
 					g_sourceFile += L"		else\r\n";
@@ -592,6 +803,7 @@ public:
 					g_sourceFile += L"	return TRUE;\r\n";
 					g_sourceFile += L"}\r\n";
 
+					g_MakeStatus = TRUE;
 				}
 
 			}
@@ -604,7 +816,7 @@ public:
 					//
 					//生成头文件依赖
 					//
-					g_sourceFile += L"//Created by AheadLib x86/x64 v1.0\r\n";
+					g_sourceFile += L"//Created by AheadLib x86/x64 v1.1\r\n";
 					g_sourceFile += L"#include <windows.h>\r\n";
 					g_sourceFile += L"#include <Shlwapi.h>\r\n";
 					g_sourceFile += L"#pragma comment( lib, \"Shlwapi.lib\")\r\n\r\n";
@@ -615,21 +827,22 @@ public:
 					//
 					for (auto funcname : exports)
 					{
+					
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									 L"#pragma comment(linker, \"/EXPORT:%S=_AheadLib_%S,@%d\")\r\n",
-									 funcname.get_name().c_str(),
-									 funcname.get_name().c_str(),
-									 funcname.get_ordinal());
+								L"#pragma comment(linker, \"/EXPORT:%S=_AheadLib_%S,@%d\")\r\n",
+								funcname.get_name().c_str(),
+								funcname.get_name().c_str(),
+								funcname.get_ordinal());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									 L"#pragma comment(linker, \"/EXPORT:Noname%d=_AheadLib_Unnamed%d,@%d,NONAME\")\r\n",
-									 funcname.get_ordinal(),
-									 funcname.get_ordinal(),
-									 funcname.get_ordinal());
+								L"#pragma comment(linker, \"/EXPORT:Noname%d=_AheadLib_Unnamed%d,@%d,NONAME\")\r\n",
+								funcname.get_ordinal(),
+								funcname.get_ordinal(),
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
@@ -644,14 +857,14 @@ public:
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									 L"PVOID pfnAheadLib_%S;\r\n",
-									 funcname.get_name().c_str());
+								L"PVOID pfnAheadLib_%S;\r\n",
+								funcname.get_name().c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									 L"PVOID pfnAheadLib_Unnamed%d;\r\n",
-									 funcname.get_ordinal());
+								L"PVOID pfnAheadLib_Unnamed%d;\r\n",
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
@@ -659,9 +872,40 @@ public:
 					g_sourceFile += L"\r\n\r\n";
 
 					//
+					//生成导出数据变量
+					//
+
+					for (auto funcname : exports)
+					{
+						if (funcname.isData_)
+						{
+							if (funcname.has_name())
+							{
+								wsprintf(tipsMessage,
+									L"EXTERN_C PVOID AheadLib_%S[%d] = { 0 };\r\n",
+									funcname.get_name().c_str(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"EXTERN_C PVOID AheadLib_Unnamed%d[%d] = { 0 };\r\n",
+									funcname.get_ordinal(),
+									funcname.isDataCount_);
+							}
+							g_sourceFile += tipsMessage;
+						}
+
+					}
+
+					g_sourceFile += L"\r\n\r\n";
+
+
+					//
 					//生成全局变量
 					//
 					g_sourceFile += L"static HMODULE	g_OldModule = NULL;\r\n\r\n";
+
 
 					//
 					//Load()
@@ -671,7 +915,7 @@ public:
 					g_sourceFile += L"{\r\n";
 					g_sourceFile += L"	TCHAR tzPath[MAX_PATH];\r\n";
 					g_sourceFile += L"	TCHAR tzTemp[MAX_PATH * 2];\r\n";
-					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH);\r\n";
+					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH); // 这里是否从系统目录加载或者当前目录，自行修改\r\n";
 					g_sourceFile += L"\r\n";
 					g_sourceFile += L"	lstrcat(tzPath, TEXT(\"\\\\";
 					g_sourceFile += g_targetFile.c_str();
@@ -717,7 +961,7 @@ public:
 					g_sourceFile += L"			pszProcName = szProcName;\r\n";
 					g_sourceFile += L"		}\r\n";
 					g_sourceFile += L"\r\n";
-					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %s,程序无法正常运行\"), pszProcName);\r\n";
+					g_sourceFile += L"		wsprintf(tzTemp, TEXT(\"无法找到函数 %S,程序无法正常运行\"), pszProcName);\r\n";
 					g_sourceFile += L"		MessageBox(NULL, tzTemp, TEXT(\"AheadLib\"), MB_ICONSTOP);\r\n";
 					g_sourceFile += L"		ExitProcess(-2);\r\n";
 					g_sourceFile += L"	}\r\n";
@@ -731,21 +975,54 @@ public:
 					g_sourceFile += L"BOOL WINAPI Init()\r\n";
 					g_sourceFile += L"{\r\n";
 
+					//
+					//生成 初始化获取原函数地址
+					//
 					for (auto funcname : exports)
 					{
 						if (funcname.has_name())
 						{
-							wsprintf(tipsMessage,
-									 L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n",
-									 funcname.get_name().c_str(),
-									 funcname.get_name().c_str());
+							if (funcname.isData_)
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n"
+									L"	memcpy(AheadLib_%S,pfnAheadLib_%S,sizeof(PVOID) * %d);\r\n",
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_%S = GetAddress(\"%S\")))\r\n		return FALSE;\r\n",
+									funcname.get_name().c_str(),
+									funcname.get_name().c_str());
+							}
+
 						}
 						else
 						{
-							wsprintf(tipsMessage,
-									 L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n",
-									 funcname.get_ordinal(),
-									 funcname.get_ordinal());
+							if (funcname.isData_)
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n"
+									L"	memcpy(AheadLib_%d,pfnAheadLib_Unnamed%d,sizeof(PVOID) * %d);\r\n",
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.get_ordinal(),
+									funcname.isDataCount_);
+							}
+							else
+							{
+								wsprintf(tipsMessage,
+									L"	if(NULL == (pfnAheadLib_Unnamed%d = GetAddress(MAKEINTRESOURCEA(%d))))\r\n		return FALSE;\r\n",
+									funcname.get_ordinal(),
+									funcname.get_ordinal());
+							}
+
 						}
 						g_sourceFile += tipsMessage;
 					}
@@ -794,9 +1071,9 @@ public:
 					g_sourceFile += L"			int nLength = 0;\r\n";
 					g_sourceFile += L"			nLength = GetModuleFileName(NULL, szFullPath, MAX_PATH);\r\n";
 					g_sourceFile += L"			PathStripPath(szFullPath);\r\n";
-					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE)//这里是否判断宿主进程名?\r\n";
+					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE) //这里是否判断宿主进程名?\r\n";
 					g_sourceFile += L"			{\r\n";
-					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL);//打补丁线程\r\n";
+					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL); //打补丁线程\r\n";
 					g_sourceFile += L"			}\r\n";
 					g_sourceFile += L"		}\r\n";
 					g_sourceFile += L"		else\r\n";
@@ -815,40 +1092,41 @@ public:
 					//
 					//生成中转函数
 					//
-					
+
 					g_sourceFile += L" // 导出函数\r\n";
 					for (auto funcname : exports)
 					{
+						if (funcname.isData_)
+						{
+							continue;
+						}
 						if (funcname.has_name())
 						{
 							wsprintf(tipsMessage,
-									 L"EXTERN_C __declspec(naked) void __cdecl AheadLib_%S(void)\r\n"
-									 L"{\r\n"
-									 L"	__asm jmp pfnAheadLib_%S;\r\n"
-									 L"}\r\n\r\n",
-									 funcname.get_name().c_str(),
-									 funcname.get_name().c_str());
+								L"EXTERN_C __declspec(naked) void __cdecl AheadLib_%S(void)\r\n"
+								L"{\r\n"
+								L"	__asm jmp pfnAheadLib_%S;\r\n"
+								L"}\r\n\r\n",
+								funcname.get_name().c_str(),
+								funcname.get_name().c_str());
 						}
 						else
 						{
 							wsprintf(tipsMessage,
-									 L"EXTERN_C __declspec(naked) void __cdecl AheadLib_Unnamed%d(void)\r\n"
-									 L"{\r\n"
-									 L"	__asm jmp pfnAheadLib_Unnamed%d;\r\n"
-									 L"}\r\n\r\n",
-									 funcname.get_ordinal(),
-									 funcname.get_ordinal());
+								L"EXTERN_C __declspec(naked) void __cdecl AheadLib_Unnamed%d(void)\r\n"
+								L"{\r\n"
+								L"	__asm jmp pfnAheadLib_Unnamed%d;\r\n"
+								L"}\r\n\r\n",
+								funcname.get_ordinal(),
+								funcname.get_ordinal());
 						}
 						g_sourceFile += tipsMessage;
 					}
 
-
+					g_MakeStatus = TRUE;
 				}
 
 			}
-		
-
-
 
 		}
 		catch (const pe_exception& e)
@@ -862,11 +1140,11 @@ public:
 	LRESULT OnBrowserFile1(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/, BOOL& /*bHandled*/)
 	{
 		CFileDialog		filedlg(TRUE,
-								NULL,
-								NULL,
-								NULL,
-								L"Dynamic Link Library(*.dll)\0*.dll\0All Files(*.*)\0*.*\0\0",
-								this->m_hWnd);
+			NULL,
+			NULL,
+			NULL,
+			L"Dynamic Link Library(*.dll)\0*.dll\0All Files(*.*)\0*.*\0\0",
+			this->m_hWnd);
 
 		if (filedlg.DoModal() == IDOK)
 		{
@@ -886,11 +1164,11 @@ public:
 	LRESULT OnBrowserFile2(WORD /*wNotifyCode*/, WORD wID, HWND /*hWndCtl*/, BOOL& /*bHandled*/)
 	{
 		CFileDialog		filedlg(FALSE,
-								NULL,
-								NULL,
-								NULL,
-								L"Source File(*.cpp)\0*.cpp\0\0",
-								this->m_hWnd);
+			NULL,
+			NULL,
+			NULL,
+			L"Source File(*.cpp)\0*.cpp\0\0",
+			this->m_hWnd);
 
 		if (filedlg.DoModal() == IDOK)
 		{
