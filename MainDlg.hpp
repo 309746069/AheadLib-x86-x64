@@ -55,7 +55,7 @@ public:
 	//	LRESULT CommandHandler(WORD /*wNotifyCode*/, WORD /*wID*/, HWND /*hWndCtl*/, BOOL& /*bHandled*/)
 	//	LRESULT NotifyHandler(int /*idCtrl*/, LPNMHDR /*pnmh*/, BOOL& /*bHandled*/)
 
-	std::wstring		g_targetFile;
+	std::wstring		gTEXTargetFile;
 	std::wstring		g_sourceFile;
 	std::wstring		g_masmFile;
 	BOOL				isx64 = FALSE;
@@ -217,7 +217,7 @@ public:
 		//
 		g_sourceFile.clear();
 		g_masmFile.clear();
-		g_targetFile.clear();
+		gTEXTargetFile.clear();
 		isx64 = FALSE;
 
 		//
@@ -225,7 +225,7 @@ public:
 		//
 		wcscpy(fileShortName, wcsFilePath);
 		PathStripPath(fileShortName);
-		g_targetFile = fileShortName;
+		gTEXTargetFile = fileShortName;
 
 		SHUnicodeToAnsi(wcsFilePath, filePath, MAX_PATH);
 
@@ -250,7 +250,7 @@ public:
 			//
 			if (!image.has_exports())
 			{
-				MessageBox(L"EXPORT_TABLE is not exist", L"info", MB_ICONERROR);
+				MessageBox(L"EXPORTTEXTABLE is not exist", L"info", MB_ICONERROR);
 				return FALSE;
 			}
 			//
@@ -426,7 +426,8 @@ public:
 					//
 					//生成提示信息
 					//
-					g_masmFile += L";Created by AheadLib x86/x64 v1.0\r\n";
+					g_masmFile += L";Created by AheadLib x86/x64 v1.2\r\n";
+					g_masmFile += L";把.asm文件添加到工程-右键-属性-常规-项类型-自定义生成工具，然后复制下面命令填入\r\n";
 					g_masmFile += L";ml64 /Fo $(IntDir)%(fileName).obj /c %(fileName).asm\r\n";
 					g_masmFile += L";$(IntDir)%(fileName).obj;%(Outputs)\r\n\r\n";
 
@@ -508,7 +509,7 @@ public:
 					//
 					//生成头文件依赖
 					//
-					g_sourceFile += L"//Created by AheadLib x86/x64 v1.1\r\n";
+					g_sourceFile += L"//Created by AheadLib x86/x64 v1.2\r\n";
 					g_sourceFile += L"#include <windows.h>\r\n";
 					g_sourceFile += L"#include <Shlwapi.h>\r\n";
 					g_sourceFile += L"#pragma comment( lib, \"Shlwapi.lib\")\r\n\r\n";
@@ -652,7 +653,7 @@ public:
 					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH);  // 这里是否从系统目录加载或者当前目录，自行修改\r\n";
 					g_sourceFile += L"\r\n";
 					g_sourceFile += L"	lstrcat(tzPath, TEXT(\"\\\\";
-					g_sourceFile += g_targetFile.c_str();
+					g_sourceFile += gTEXTargetFile.c_str();
 					g_sourceFile += L"\"));\r\n";
 					g_sourceFile += L"	g_OldModule = LoadLibrary(tzPath);\r\n";
 					g_sourceFile += L"	if (g_OldModule == NULL)\r\n";
@@ -675,7 +676,7 @@ public:
 					g_sourceFile += L"		FreeLibrary(g_OldModule);\r\n";
 					g_sourceFile += L"	}\r\n";
 					g_sourceFile += L"}\r\n";
-
+					
 					//
 					//GetAddress()
 					//
@@ -793,7 +794,7 @@ public:
 					g_sourceFile += L"}\r\n\r\n";
 
 
-
+				
 					//0
 					//生成DllMain
 					//
@@ -810,7 +811,7 @@ public:
 					g_sourceFile += L"			int nLength = 0;\r\n";
 					g_sourceFile += L"			nLength = GetModuleFileName(NULL, szFullPath, MAX_PATH);\r\n";
 					g_sourceFile += L"			PathStripPath(szFullPath);\r\n";
-					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE) //这里是否判断宿主进程名?\r\n";
+					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0) //这里是否判断宿主进程名?\r\n";
 					g_sourceFile += L"			{\r\n";
 					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL); //打补丁线程\r\n";
 					g_sourceFile += L"			}\r\n";
@@ -841,7 +842,7 @@ public:
 					//
 					//生成头文件依赖
 					//
-					g_sourceFile += L"//Created by AheadLib x86/x64 v1.1\r\n";
+					g_sourceFile += L"//Created by AheadLib x86/x64 v1.2\r\n";
 					g_sourceFile += L"#include <windows.h>\r\n";
 					g_sourceFile += L"#include <Shlwapi.h>\r\n";
 					g_sourceFile += L"#pragma comment( lib, \"Shlwapi.lib\")\r\n\r\n";
@@ -964,7 +965,7 @@ public:
 					g_sourceFile += L"	GetSystemDirectory(tzPath, MAX_PATH); // 这里是否从系统目录加载或者当前目录，自行修改\r\n";
 					g_sourceFile += L"\r\n";
 					g_sourceFile += L"	lstrcat(tzPath, TEXT(\"\\\\";
-					g_sourceFile += g_targetFile.c_str();
+					g_sourceFile += gTEXTargetFile.c_str();
 					g_sourceFile += L"\"));\r\n";
 					g_sourceFile += L"	g_OldModule = LoadLibrary(tzPath);\r\n";
 					g_sourceFile += L"	if (g_OldModule == NULL)\r\n";
@@ -1082,7 +1083,7 @@ public:
 
 					g_sourceFile += L"	return TRUE;\r\n";
 					g_sourceFile += L"}\r\n\r\n";
-
+					
 
 					//
 					//生成patch线程代码
@@ -1124,7 +1125,7 @@ public:
 					g_sourceFile += L"			int nLength = 0;\r\n";
 					g_sourceFile += L"			nLength = GetModuleFileName(NULL, szFullPath, MAX_PATH);\r\n";
 					g_sourceFile += L"			PathStripPath(szFullPath);\r\n";
-					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 || TRUE) //这里是否判断宿主进程名?\r\n";
+					g_sourceFile += L"			if (StrCmpI(szAppName, szFullPath) == 0 ) //这里是否判断宿主进程名?\r\n";
 					g_sourceFile += L"			{\r\n";
 					g_sourceFile += L"				::CreateThread(NULL, NULL, ThreadProc, NULL, NULL, NULL); //打补丁线程\r\n";
 					g_sourceFile += L"			}\r\n";
